@@ -2,7 +2,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.Files;
@@ -58,46 +57,54 @@ public class BalaSolver_SSS {
             generateCombinations(allShares, k, 0, new ArrayList<>(), combinations);
 
             for (List<Share> currentCombination : combinations) {
-                BigInteger candidateSecret = reconstructSecret(currentCombination);
+                // With k points, we define a candidate polynomial.
+                // Now we check all n shares against this polynomial.
                 
                 List<Share> consistentShares = new ArrayList<>();
                 List<Share> inconsistentShares = new ArrayList<>();
 
+                // *** REVISED AND CORRECTED VERIFICATION LOGIC ***
                 for (Share shareToCheck : allShares) {
-                    List<Share> testSet = new ArrayList<>(currentCombination.subList(0, k - 1));
-                    testSet.add(shareToCheck);
-                    
                     try {
-                        if (reconstructSecret(testSet).equals(candidateSecret)) {
+                        BigInteger expectedY = evaluatePolynomial(currentCombination, shareToCheck.x);
+                        if (expectedY.equals(shareToCheck.y)) {
                             consistentShares.add(shareToCheck);
                         } else {
                             inconsistentShares.add(shareToCheck);
                         }
                     } catch (ArithmeticException e) {
-                        inconsistentShares.add(shareToCheck);
+                        // This will happen if a point in currentCombination has the same x as shareToCheck
+                        // This is fine, we just need to handle it. If they are the same point, they are consistent.
+                        boolean foundMatch = false;
+                        for(Share comboShare : currentCombination) {
+                            if (comboShare.x.equals(shareToCheck.x) && comboShare.y.equals(shareToCheck.y)) {
+                                consistentShares.add(shareToCheck);
+                                foundMatch = true;
+                                break;
+                            }
+                        }
+                        if (!foundMatch) {
+                           inconsistentShares.add(shareToCheck);
+                        }
                     }
                 }
+                // *** END OF REVISED LOGIC ***
 
-                // Original check for exactly ONE wrong share
                 if (consistentShares.size() == n - 1) {
                     System.out.println("\n----------------- SOLUTION FOUND -----------------");
-                    System.out.println("SECRET (Constant Value): " + candidateSecret);
+                    System.out.println("SECRET (Constant Value): " + reconstructSecret(currentCombination));
                     System.out.println("WRONG SHARE: " + inconsistentShares.get(0));
                     System.out.println("--------------------------------------------------");
                     return;
                 }
 
-                // ***************************************************
-                // *** NEW CODE ADDED HERE ***
-                // Check for the case where ALL shares are correct
                 if (consistentShares.size() == n) {
                     System.out.println("\n----------------- SOLUTION FOUND -----------------");
                     System.out.println("All " + n + " shares are correct and consistent.");
-                    System.out.println("SECRET (Constant Value): " + candidateSecret);
+                    System.out.println("SECRET (Constant Value): " + reconstructSecret(currentCombination));
                     System.out.println("--------------------------------------------------");
-                    return; // Exit after finding the solution
+                    return;
                 }
-                // ***************************************************
             }
             
             System.out.println("Could not find a solution.");
@@ -107,15 +114,27 @@ public class BalaSolver_SSS {
             e.printStackTrace();
         }
     }
-
+    
+    /**
+     * Reconstructs the secret (the polynomial's value at x=0).
+     */
     public static BigInteger reconstructSecret(List<Share> shares) {
-        int k = shares.size();
-        BigInteger secret = BigInteger.ZERO;
+        return evaluatePolynomial(shares, BigInteger.ZERO);
+    }
+
+    /**
+     * Evaluates the polynomial defined by the given points at a specific x-value using Lagrange Interpolation.
+     * P(x) = SUM { y_j * L_j(x) }
+     * L_j(x) = PRODUCT { (x - x_m) / (x_j - x_m) } for m != j
+     */
+    public static BigInteger evaluatePolynomial(List<Share> points, BigInteger xValue) {
+        int k = points.size();
+        BigInteger result = BigInteger.ZERO;
 
         for (int j = 0; j < k; j++) {
-            Share currentShare = shares.get(j);
-            BigInteger xj = currentShare.x;
-            BigInteger yj = currentShare.y;
+            Share currentPoint = points.get(j);
+            BigInteger xj = currentPoint.x;
+            BigInteger yj = currentPoint.y;
 
             BigInteger numerator = BigInteger.ONE;
             BigInteger denominator = BigInteger.ONE;
@@ -124,16 +143,16 @@ public class BalaSolver_SSS {
                 if (j == m) {
                     continue;
                 }
-                BigInteger xm = shares.get(m).x;
+                BigInteger xm = points.get(m).x;
                 
-                numerator = numerator.multiply(xm);
-                denominator = denominator.multiply(xm.subtract(xj));
+                numerator = numerator.multiply(xValue.subtract(xm));
+                denominator = denominator.multiply(xj.subtract(xm));
             }
             
             BigInteger term = yj.multiply(numerator).divide(denominator);
-            secret = secret.add(term);
+            result = result.add(term);
         }
-        return secret;
+        return result;
     }
 
     private static void generateCombinations(List<Share> allShares, int k, int start, 
